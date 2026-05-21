@@ -1,41 +1,44 @@
-export type UserRecord = {
-  id: string;
-  name: string;
-  email: string;
-  password: string;
-  createdAt: string;
-};
+import bcrypt from "bcryptjs";
+import { connectDB } from "@/db/mongoose";
+import User from "@/db/models/User";
 
-const usersByEmail = new Map<string, UserRecord>();
+export async function createUser(payload: { name: string; email: string; password: string; role?: "ADMIN" | "EMPLOYEE" }) {
+  await connectDB();
 
-function normalizeEmail(email: string) {
-  return email.trim().toLowerCase();
-}
-
-export function createUser(payload: { name: string; email: string; password: string }) {
-  const email = normalizeEmail(payload.email);
-  if (usersByEmail.has(email)) {
+  const existing = await User.findOne({ email: payload.email.toLowerCase().trim() });
+  if (existing) {
     return { ok: false as const, message: "An account with this email already exists." };
   }
 
-  const user: UserRecord = {
-    id: crypto.randomUUID(),
+  const hashed = await bcrypt.hash(payload.password, 12);
+  const user = await User.create({
     name: payload.name.trim(),
-    email,
-    password: payload.password,
-    createdAt: new Date().toISOString(),
-  };
+    email: payload.email.toLowerCase().trim(),
+    password: hashed,
+    role: payload.role || "EMPLOYEE",
+  });
 
-  usersByEmail.set(email, user);
-  return { ok: true as const, user };
+  return {
+    ok: true as const,
+    user: { id: String(user._id), name: user.name, email: user.email, role: user.role },
+  };
 }
 
-export function verifyUser(payload: { email: string; password: string }) {
-  const email = normalizeEmail(payload.email);
-  const user = usersByEmail.get(email);
-  if (!user || user.password !== payload.password) {
+export async function verifyUser(payload: { email: string; password: string }) {
+  await connectDB();
+
+  const user = await User.findOne({ email: payload.email.toLowerCase().trim() });
+  if (!user) {
     return { ok: false as const, message: "Invalid email or password." };
   }
 
-  return { ok: true as const, user };
+  const match = await bcrypt.compare(payload.password, user.password);
+  if (!match) {
+    return { ok: false as const, message: "Invalid email or password." };
+  }
+
+  return {
+    ok: true as const,
+    user: { id: String(user._id), name: user.name, email: user.email, role: user.role },
+  };
 }

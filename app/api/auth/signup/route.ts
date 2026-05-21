@@ -1,33 +1,21 @@
 import { createUser } from "@/lib/auth-store";
-
-type SignupBody = {
-  name?: string;
-  email?: string;
-  password?: string;
-};
+import { signupSchema } from "@/zod";
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as SignupBody;
-    const name = body.name?.trim() ?? "";
-    const email = body.email?.trim() ?? "";
-    const password = body.password ?? "";
+    const body = await request.json();
+    const result = signupSchema.safeParse(body);
 
-    if (!name || !email || !password) {
+    if (!result.success) {
       return Response.json(
-        { message: "Name, email, and password are required." },
+        { message: result.error.issues[0].message },
         { status: 400 },
       );
     }
 
-    if (password.length < 6) {
-      return Response.json(
-        { message: "Password must be at least 6 characters long." },
-        { status: 400 },
-      );
-    }
+    const { name, email, password, role } = result.data;
 
-    const created = createUser({ name, email, password });
+    const created = await createUser({ name, email, password, role });
     if (!created.ok) {
       return Response.json({ message: created.message }, { status: 409 });
     }
@@ -35,11 +23,7 @@ export async function POST(request: Request) {
     return Response.json(
       {
         message: "Account created successfully.",
-        user: {
-          id: created.user.id,
-          name: created.user.name,
-          email: created.user.email,
-        },
+        user: { id: created.user.id, name: created.user.name, email: created.user.email, role: created.user.role },
       },
       { status: 201 },
     );

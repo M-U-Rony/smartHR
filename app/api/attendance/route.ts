@@ -1,101 +1,96 @@
-import {
-  AttendanceStatus,
-  createAttendance,
-  deleteAttendance,
-  listAttendance,
-  updateAttendance,
-} from "@/lib/attendance-store";
+import { connectDB } from "@/db/mongoose";
+import Attendance from "@/db/models/Attendance";
+import Employee from "@/db/models/Employee";
+import { attendanceSchema } from "@/zod";
 
-type AttendanceBody = {
-  id?: string;
-  employeeName?: string;
-  date?: string;
-  status?: string;
-  note?: string;
-};
+export async function GET(request: Request) {
+  try {
+    await connectDB();
+    const { searchParams } = new URL(request.url);
+    const email = searchParams.get("email");
+    const date = searchParams.get("date");
+    const month = searchParams.get("month"); // Format: YYYY-MM
 
-const validStatuses: AttendanceStatus[] = ["present", "absent", "late"];
+    if (email) {
+      // Get attendance history for single employee
+      const history = await Attendance.find({ employeeEmail: email.toLowerCase() }).sort({ date: -1 });
+      return Response.json(history, { status: 200 });
+    }
 
-function isValidStatus(status: string): status is AttendanceStatus {
-  return validStatuses.includes(status as AttendanceStatus);
-}
+    if (date) {
+      // Get attendance logs for specific date
+      const logs = await Attendance.find({ date });
+      return Response.json(logs, { status: 200 });
+    }
 
-export async function GET() {
-  return Response.json({ attendance: listAttendance() }, { status: 200 });
+    if (month) {
+      // Generate monthly stats
+      // Regex search for date starting with YYYY-MM
+      const logs = await Attendance.find({ date: new RegExp(`^${month}`) });
+      return Response.json(logs, { status: 200 });
+    }
+
+    // Default: return recent 100 logs
+    const allLogs = await Attendance.find({}).sort({ date: -1 }).limit(100);
+    return Response.json(allLogs, { status: 200 });
+  } catch (error: any) {
+    return Response.json({ message: error.message || "Failed to fetch attendance." }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as AttendanceBody;
-    const employeeName = body.employeeName?.trim() ?? "";
-    const date = body.date?.trim() ?? "";
-    const status = body.status?.trim().toLowerCase() ?? "";
-    const note = body.note?.trim() ?? "";
+    await connectDB();
+    const body = await request.json();
+    
+    // We can handle both complete attendance records and incremental clock-in/out updates
+    const { employeeEmail, date, status, clockIn, clockOut, note, isClockOutOnly } = body;
 
-    if (!employeeName || !date || !status) {
-      return Response.json(
-        { message: "Employee name, date, and status are required." },
-        { status: 400 },
-      );
+    if (!employeeEmail || !date) {
+      return Response.json({ message: "Employee Email and Date are required." }, { status: 400 });
     }
 
-    if (!isValidStatus(status)) {
-      return Response.json({ message: "Status must be present, absent, or late." }, { status: 400 });
+    const emailKey = employeeEmail.toLowerCase().trim();
+
+    // Check if the employee profile actually exists
+    const employee = await Employee.findOne({ email: emailKey });
+    if (!employee) {
+      return Response.json({ message: "Employee profile not found for this email." }, { status: 404 });
     }
 
-    const created = createAttendance({ employeeName, date, status, note });
-    return Response.json({ record: created.record }, { status: 201 });
-  } catch {
-    return Response.json({ message: "Invalid request payload." }, { status: 400 });
-  }
-}
+    // Find if there's an existing log for this date and employee
+    const existingLog = await Attendance.findOne({ employeeEmail: emailKey, date });
 
-export async function PATCH(request: Request) {
-  try {
-    const body = (await request.json()) as AttendanceBody;
-    const id = body.id?.trim() ?? "";
-    const employeeName = body.employeeName?.trim() ?? "";
-    const date = body.date?.trim() ?? "";
-    const status = body.status?.trim().toLowerCase() ?? "";
-    const note = body.note?.trim() ?? "";
-
-    if (!id || !employeeName || !date || !status) {
-      return Response.json(
-        { message: "Id, employee name, date, and status are required." },
-        { status: 400 },
-      );
+    if (isClockOutOnly) {
+      if (!existingLog) {
+        return Response.json({ message: "No check-in record found for today." }, { status: 400 });
+      }
+      existingLog.clockOut = clockOut || new Date().toLocaleTimeString("en-US", { hour12: false });
+      await existingLog.save();
+      return Response.json(existingLog, { status: 200 });
     }
 
-    if (!isValidStatus(status)) {
-      return Response.json({ message: "Status must be present, absent, or late." }, { status: 400 });
+    if (existingLog) {
+      // Update existing record
+      if (status) existingLog.status = status;
+      if (clockIn) existingLog.clockIn = clockIn;
+      if (clockOut) existingLog.clockOut = clockOut;
+      if (note !== undefined) existingLog.note = note;
+      await existingLog.save();
+      return Response.json(existingLog, { status: 200 });
+    } else {
+      // Create new record
+      const newLog = await Attendance.create({
+        employeeEmail: emailKey,
+        date,
+        status: status || "present",
+        clockIn: clockIn || new Date().toLocaleTimeString("en-US", { hour12: false }),
+        clockOut: clockOut || "",
+        note: note || "",
+      });
+      return Response.json(newLog, { status: 201 });
     }
-
-    const updated = updateAttendance({ id, employeeName, date, status, note });
-    if (!updated.ok) {
-      return Response.json({ message: updated.message }, { status: updated.status });
-    }
-
-    return Response.json({ record: updated.record }, { status: 200 });
-  } catch {
-    return Response.json({ message: "Invalid request payload." }, { status: 400 });
-  }
-}
-
-export async function DELETE(request: Request) {
-  try {
-    const body = (await request.json()) as AttendanceBody;
-    const id = body.id?.trim() ?? "";
-    if (!id) {
-      return Response.json({ message: "Id is required." }, { status: 400 });
-    }
-
-    const removed = deleteAttendance(id);
-    if (!removed.ok) {
-      return Response.json({ message: removed.message }, { status: 404 });
-    }
-
-    return new Response(null, { status: 204 });
-  } catch {
-    return Response.json({ message: "Invalid request payload." }, { status: 400 });
+  } catch (error: any) {
+    return Response.json({ message: error.message || "Failed to save attendance." }, { status: 500 });
   }
 }

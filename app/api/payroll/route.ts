@@ -1,60 +1,98 @@
-import {
-  createPayrollRecord,
-  deletePayrollRecord,
-  listPayrollRecords,
-} from "@/lib/payroll-store";
+import { connectDB } from "@/db/mongoose";
+import Payroll from "@/db/models/Payroll";
+import Employee from "@/db/models/Employee";
+import { payrollSchema } from "@/zod";
 
-type PayrollBody = {
-  id?: string;
-  employeeName?: string;
-  baseSalary?: number;
-  overtimeHours?: number;
-  overtimeRate?: number;
-  deduction?: number;
-};
+export async function GET(request: Request) {
+  try {
+    await connectDB();
+    const { searchParams } = new URL(request.url);
+    const email = searchParams.get("email");
+    const month = searchParams.get("month");
 
-export async function GET() {
-  return Response.json({ payroll: listPayrollRecords() }, { status: 200 });
+    if (email) {
+      const records = await Payroll.find({ employeeEmail: email.toLowerCase() }).sort({ month: -1 });
+      return Response.json(records, { status: 200 });
+    }
+
+    if (month) {
+      const records = await Payroll.find({ month }).sort({ employeeName: 1 });
+      return Response.json(records, { status: 200 });
+    }
+
+    const allRecords = await Payroll.find({}).sort({ month: -1 });
+    return Response.json(allRecords, { status: 200 });
+  } catch (error: any) {
+    return Response.json({ message: error.message || "Failed to fetch payroll records." }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as PayrollBody;
-    const employeeName = body.employeeName?.trim() ?? "";
+    await connectDB();
+    const body = await request.json();
 
-    if (!employeeName) {
-      return Response.json({ message: "Employee name is required." }, { status: 400 });
+    // Custom check since body requires base salary from Employee
+    const { employeeEmail, month, overtimeHours, overtimeRate, deductions, status } = body;
+
+    if (!employeeEmail || !month) {
+      return Response.json({ message: "Employee Email and Month are required." }, { status: 400 });
     }
 
-    const created = createPayrollRecord({
-      employeeName,
-      baseSalary: Number(body.baseSalary ?? 0),
-      overtimeHours: Number(body.overtimeHours ?? 0),
-      overtimeRate: Number(body.overtimeRate ?? 0),
-      deduction: Number(body.deduction ?? 0),
-    });
+    const employee = await Employee.findOne({ email: employeeEmail.toLowerCase().trim() });
+    if (!employee) {
+      return Response.json({ message: "Employee profile not found." }, { status: 404 });
+    }
 
-    return Response.json({ record: created.record }, { status: 201 });
-  } catch {
-    return Response.json({ message: "Invalid request payload." }, { status: 400 });
+    const baseSalary = employee.salary;
+    const oth = Number(overtimeHours) || 0;
+    const otr = Number(overtimeRate) || 0;
+    const ded = Number(deductions) || 0;
+    
+    // Calculate net salary
+    const netSalary = Math.max(0, baseSalary + (oth * otr) - ded);
+
+    // Upsert payroll (update if exists, insert if new)
+    const payroll = await Payroll.findOneAndUpdate(
+      { employeeEmail: employee.email, month },
+      {
+        employeeName: employee.name,
+        baseSalary,
+        overtimeHours: oth,
+        overtimeRate: otr,
+        deductions: ded,
+        netSalary,
+        status: status || "pending",
+      },
+      { new: true, upsert: true }
+    );
+
+    return Response.json(payroll, { status: 200 });
+  } catch (error: any) {
+    return Response.json({ message: error.message || "Failed to generate payroll." }, { status: 500 });
   }
 }
 
-export async function DELETE(request: Request) {
+export async function PUT(request: Request) {
   try {
-    const body = (await request.json()) as PayrollBody;
-    const id = body.id?.trim() ?? "";
-    if (!id) {
-      return Response.json({ message: "Id is required." }, { status: 400 });
+    await connectDB();
+    const body = await request.json();
+    const { id, status } = body;
+
+    if (!id || !status) {
+      return Response.json({ message: "Payroll ID and status are required." }, { status: 400 });
     }
 
-    const removed = deletePayrollRecord(id);
-    if (!removed.ok) {
-      return Response.json({ message: removed.message }, { status: 404 });
+    const payroll = await Payroll.findById(id);
+    if (!payroll) {
+      return Response.json({ message: "Payroll record not found." }, { status: 404 });
     }
 
-    return new Response(null, { status: 204 });
-  } catch {
-    return Response.json({ message: "Invalid request payload." }, { status: 400 });
+    payroll.status = status;
+    await payroll.save();
+
+    return Response.json(payroll, { status: 200 });
+  } catch (error: any) {
+    return Response.json({ message: error.message || "Failed to update payroll status." }, { status: 500 });
   }
 }

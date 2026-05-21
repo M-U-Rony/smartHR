@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 type Feature = {
   title: string;
   description: string;
@@ -139,7 +141,28 @@ function SectionHeading({
 export default function LandingPage() {
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
-      <section className="relative overflow-hidden border-b border-slate-200 bg-gradient-to-b from-white to-blue-50/60">
+      <header className="absolute inset-x-0 top-0 z-50">
+        <nav className="mx-auto flex max-w-7xl items-center justify-between p-6 lg:px-8" aria-label="Global">
+          <div className="flex lg:flex-1">
+            <Link href="/" className="-m-1.5 p-1.5">
+              <span className="text-xl font-bold text-slate-900">SmartHR</span>
+            </Link>
+          </div>
+          <div className="flex flex-1 justify-end items-center gap-x-6">
+            <Link href="/careers" className="text-sm font-semibold leading-6 text-slate-950 hover:text-blue-600 transition mr-2">
+              Careers
+            </Link>
+            <Link href="/signin" className="text-sm font-semibold leading-6 text-slate-900 hover:text-blue-600 transition">
+              Sign in
+            </Link>
+            <Link href="/signup" className="rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 transition">
+              Sign up
+            </Link>
+          </div>
+        </nav>
+      </header>
+
+      <section className="relative overflow-hidden border-b border-slate-200 bg-gradient-to-b from-white to-blue-50/60 pt-16">
         <div className="absolute -left-28 top-10 h-72 w-72 rounded-full bg-blue-200/30 blur-3xl" />
         <div className="absolute -right-28 bottom-0 h-72 w-72 rounded-full bg-indigo-200/30 blur-3xl" />
         <div className="mx-auto grid max-w-7xl gap-12 px-6 py-20 sm:py-24 lg:grid-cols-2 lg:items-center lg:px-8">
@@ -155,9 +178,9 @@ export default function LandingPage() {
               better workplace experiences.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-4">
-              <button className="inline-flex items-center rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-blue-700 hover:shadow-lg">
+              <Link href="/signup" className="inline-flex items-center rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-blue-700 hover:shadow-lg">
                 Get Started
-              </button>
+              </Link>
               <button className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:-translate-y-0.5 hover:border-slate-400 hover:shadow-md">
                 Request Demo
               </button>
@@ -382,9 +405,9 @@ export default function LandingPage() {
                 Start managing your team efficiently today
               </h2>
             </div>
-            <button className="inline-flex items-center rounded-lg bg-white px-5 py-3 text-sm font-semibold text-slate-900 transition hover:-translate-y-0.5 hover:bg-blue-50">
+            <Link href="/signup" className="inline-flex items-center rounded-lg bg-white px-5 py-3 text-sm font-semibold text-slate-900 transition hover:-translate-y-0.5 hover:bg-blue-50">
               Get Started
-            </button>
+            </Link>
           </div>
         </div>
       </section>

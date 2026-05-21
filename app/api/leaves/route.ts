@@ -1,65 +1,111 @@
-import { LeaveStatus, applyLeave, listLeaves, reviewLeave } from "@/lib/leave-store";
+import { connectDB } from "@/db/mongoose";
+import Leave from "@/db/models/Leave";
+import Employee from "@/db/models/Employee";
+import { leaveSchema, leaveReviewSchema } from "@/zod";
 
-type LeaveBody = {
-  id?: string;
-  employeeName?: string;
-  fromDate?: string;
-  toDate?: string;
-  reason?: string;
-  status?: string;
-};
+export async function GET(request: Request) {
+  try {
+    await connectDB();
+    const { searchParams } = new URL(request.url);
+    const email = searchParams.get("email");
 
-function isValidReviewStatus(status: string): status is LeaveStatus {
-  return status === "approved" || status === "rejected";
-}
+    if (email) {
+      const leaves = await Leave.find({ employeeEmail: email.toLowerCase() }).sort({ createdAt: -1 });
+      return Response.json(leaves, { status: 200 });
+    }
 
-export async function GET() {
-  return Response.json({ leaves: listLeaves() }, { status: 200 });
+    const allLeaves = await Leave.find({}).sort({ createdAt: -1 });
+    return Response.json(allLeaves, { status: 200 });
+  } catch (error: any) {
+    return Response.json({ message: error.message || "Failed to fetch leave requests." }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as LeaveBody;
-    const employeeName = body.employeeName?.trim() ?? "";
-    const fromDate = body.fromDate?.trim() ?? "";
-    const toDate = body.toDate?.trim() ?? "";
-    const reason = body.reason?.trim() ?? "";
+    await connectDB();
+    const body = await request.json();
+    const result = leaveSchema.safeParse(body);
 
-    if (!employeeName || !fromDate || !toDate || !reason) {
-      return Response.json(
-        { message: "Employee name, from date, to date, and reason are required." },
-        { status: 400 },
-      );
+    if (!result.success) {
+      return Response.json({ message: result.error.issues[0].message }, { status: 400 });
     }
 
-    const created = applyLeave({ employeeName, fromDate, toDate, reason });
-    return Response.json({ leave: created.leave }, { status: 201 });
-  } catch {
-    return Response.json({ message: "Invalid request payload." }, { status: 400 });
+    const { employeeName, fromDate, toDate, reason } = result.data;
+    
+    // We need employeeEmail from request body since employeeName is validated, but let's read employeeEmail
+    const employeeEmail = body.employeeEmail?.toLowerCase().trim();
+    if (!employeeEmail) {
+      return Response.json({ message: "Employee Email is required." }, { status: 400 });
+    }
+
+    const employee = await Employee.findOne({ email: employeeEmail });
+    if (!employee) {
+      return Response.json({ message: "Employee profile not found." }, { status: 404 });
+    }
+
+    // Calculate days between fromDate and toDate
+    const start = new Date(fromDate);
+    const end = new Date(toDate);
+    const diffTime = Math.abs(end.getTime() - start.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+
+    // Check if remaining leaves are sufficient
+    const remaining = employee.totalLeaves - employee.leavesUsed;
+    if (diffDays > remaining) {
+      return Response.json({ message: `Insufficient leave balance. You only have ${remaining} days left.` }, { status: 400 });
+    }
+
+    const leaveRequest = await Leave.create({
+      employeeEmail,
+      employeeName: employee.name,
+      fromDate,
+      toDate,
+      reason,
+      days: diffDays,
+      status: "pending",
+    });
+
+    return Response.json(leaveRequest, { status: 201 });
+  } catch (error: any) {
+    return Response.json({ message: error.message || "Failed to submit leave request." }, { status: 500 });
   }
 }
 
-export async function PATCH(request: Request) {
+export async function PUT(request: Request) {
   try {
-    const body = (await request.json()) as LeaveBody;
-    const id = body.id?.trim() ?? "";
-    const status = body.status?.trim().toLowerCase() ?? "";
+    await connectDB();
+    const body = await request.json();
+    const result = leaveReviewSchema.safeParse(body);
 
-    if (!id || !status) {
-      return Response.json({ message: "Id and status are required." }, { status: 400 });
+    if (!result.success) {
+      return Response.json({ message: result.error.issues[0].message }, { status: 400 });
     }
 
-    if (!isValidReviewStatus(status)) {
-      return Response.json({ message: "Status must be approved or rejected." }, { status: 400 });
+    const { id, status } = result.data;
+
+    const leave = await Leave.findById(id);
+    if (!leave) {
+      return Response.json({ message: "Leave request not found." }, { status: 404 });
     }
 
-    const reviewed = reviewLeave({ id, status });
-    if (!reviewed.ok) {
-      return Response.json({ message: reviewed.message }, { status: reviewed.status });
+    if (leave.status !== "pending") {
+      return Response.json({ message: "This leave request has already been processed." }, { status: 400 });
     }
 
-    return Response.json({ leave: reviewed.leave }, { status: 200 });
-  } catch {
-    return Response.json({ message: "Invalid request payload." }, { status: 400 });
+    if (status === "approved") {
+      const employee = await Employee.findOne({ email: leave.employeeEmail });
+      if (employee) {
+        employee.leavesUsed += leave.days;
+        await employee.save();
+      }
+    }
+
+    leave.status = status;
+    await leave.save();
+
+    return Response.json(leave, { status: 200 });
+  } catch (error: any) {
+    return Response.json({ message: error.message || "Failed to update leave request." }, { status: 500 });
   }
 }

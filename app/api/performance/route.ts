@@ -1,69 +1,53 @@
-import {
-  addPerformance,
-  buildYearlyReport,
-  deletePerformance,
-  listPerformance,
-} from "@/lib/performance-store";
+import { connectDB } from "@/db/mongoose";
+import Performance from "@/db/models/Performance";
+import Employee from "@/db/models/Employee";
+import { performanceSchema } from "@/zod";
 
-type PerformanceBody = {
-  id?: string;
-  employeeName?: string;
-  year?: number;
-  rating?: number;
-  comments?: string;
-};
+export async function GET(request: Request) {
+  try {
+    await connectDB();
+    const { searchParams } = new URL(request.url);
+    const email = searchParams.get("email");
 
-export async function GET() {
-  return Response.json(
-    {
-      records: listPerformance(),
-      yearlyReport: buildYearlyReport(),
-    },
-    { status: 200 },
-  );
+    if (email) {
+      const evaluations = await Performance.find({ employeeEmail: email.toLowerCase() }).sort({ year: -1 });
+      return Response.json(evaluations, { status: 200 });
+    }
+
+    const allEvaluations = await Performance.find({}).sort({ year: -1, createdAt: -1 });
+    return Response.json(allEvaluations, { status: 200 });
+  } catch (error: any) {
+    return Response.json({ message: error.message || "Failed to fetch performance reviews." }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as PerformanceBody;
-    const employeeName = body.employeeName?.trim() ?? "";
-    const year = Number(body.year ?? 0);
-    const rating = Number(body.rating ?? 0);
-    const comments = body.comments?.trim() ?? "";
+    await connectDB();
+    const body = await request.json();
+    
+    const { employeeEmail, year, rating, comments, reviewedBy } = body;
 
-    if (!employeeName || !year || !rating || !comments) {
-      return Response.json(
-        { message: "Employee name, year, rating, and comments are required." },
-        { status: 400 },
-      );
+    if (!employeeEmail || !year || !rating || !comments || !reviewedBy) {
+      return Response.json({ message: "All fields are required." }, { status: 400 });
     }
 
-    if (rating < 1 || rating > 5) {
-      return Response.json({ message: "Rating must be between 1 and 5." }, { status: 400 });
+    const employee = await Employee.findOne({ email: employeeEmail.toLowerCase().trim() });
+    if (!employee) {
+      return Response.json({ message: "Employee profile not found." }, { status: 404 });
     }
 
-    const created = addPerformance({ employeeName, year, rating, comments });
-    return Response.json({ record: created.record }, { status: 201 });
-  } catch {
-    return Response.json({ message: "Invalid request payload." }, { status: 400 });
-  }
-}
+    const review = await Performance.create({
+      employeeEmail: employee.email,
+      employeeName: employee.name,
+      year: Number(year),
+      rating: Number(rating),
+      comments: comments.trim(),
+      reviewedBy: reviewedBy.trim(),
+    });
 
-export async function DELETE(request: Request) {
-  try {
-    const body = (await request.json()) as PerformanceBody;
-    const id = body.id?.trim() ?? "";
-    if (!id) {
-      return Response.json({ message: "Id is required." }, { status: 400 });
-    }
-
-    const removed = deletePerformance(id);
-    if (!removed.ok) {
-      return Response.json({ message: removed.message }, { status: 404 });
-    }
-
-    return new Response(null, { status: 204 });
-  } catch {
-    return Response.json({ message: "Invalid request payload." }, { status: 400 });
+    return Response.json(review, { status: 201 });
+  } catch (error: any) {
+    return Response.json({ message: error.message || "Failed to submit performance review." }, { status: 500 });
   }
 }

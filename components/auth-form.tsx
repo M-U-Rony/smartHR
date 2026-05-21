@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, LogIn, UserPlus } from "lucide-react";
 
@@ -17,6 +17,7 @@ type ApiResponse = {
     id: string;
     name: string;
     email: string;
+    role?: "ADMIN" | "EMPLOYEE";
   };
 };
 
@@ -26,9 +27,40 @@ export default function AuthForm({ mode }: AuthFormProps) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [role, setRole] = useState<"ADMIN" | "EMPLOYEE">("EMPLOYEE");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
+  useEffect(() => {
+    async function checkAuth() {
+      try {
+        const res = await fetch("/api/auth/me");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.user?.role === "EMPLOYEE") {
+            router.push("/employee");
+          } else {
+            router.push("/dashboard");
+          }
+        } else {
+          setCheckingAuth(false);
+        }
+      } catch {
+        setCheckingAuth(false);
+      }
+    }
+    checkAuth();
+  }, [router]);
+
+  if (checkingAuth) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-50">
+        <Loader2 className="h-10 w-10 animate-spin text-blue-600" />
+      </div>
+    );
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -43,7 +75,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          ...(isSignup ? { name } : {}),
+          ...(isSignup ? { name, role } : {}),
           email,
           password,
         }),
@@ -62,7 +94,11 @@ export default function AuthForm({ mode }: AuthFormProps) {
         setName("");
         router.push("/signin");
       } else {
-        router.push("/dashboard");
+        if (data.user?.role === "EMPLOYEE") {
+          router.push("/employee");
+        } else {
+          router.push("/dashboard");
+        }
       }
     } catch {
       setError("Unable to connect to the server. Please try again.");
@@ -97,9 +133,39 @@ export default function AuthForm({ mode }: AuthFormProps) {
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 required
-                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                 placeholder="John Doe"
               />
+            </div>
+          )}
+
+          {isSignup && (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">Role</label>
+              <div className="flex items-center gap-4 mt-1">
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="radio"
+                    name="role"
+                    value="EMPLOYEE"
+                    checked={role === "EMPLOYEE"}
+                    onChange={(e) => setRole(e.target.value as "ADMIN" | "EMPLOYEE")}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-300"
+                  />
+                  Employee
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="radio"
+                    name="role"
+                    value="ADMIN"
+                    checked={role === "ADMIN"}
+                    onChange={(e) => setRole(e.target.value as "ADMIN" | "EMPLOYEE")}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-300"
+                  />
+                  Admin
+                </label>
+              </div>
             </div>
           )}
 
@@ -113,7 +179,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               required
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               placeholder="you@company.com"
             />
           </div>
@@ -129,7 +195,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
               onChange={(event) => setPassword(event.target.value)}
               required
               minLength={6}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               placeholder="Minimum 6 characters"
             />
           </div>
