@@ -1,4 +1,12 @@
 import mongoose from "mongoose";
+import dns from "node:dns";
+
+// Dynamically set public DNS servers to resolve MongoDB SRV records (fixes ECONNREFUSED/querySrv)
+try {
+  dns.setServers(["1.1.1.1", "8.8.8.8"]);
+} catch (err) {
+  console.warn("Failed to set custom DNS servers:", err);
+}
 
 const MONGODB_URL = process.env.MONGODB_URL as string;
 
@@ -29,6 +37,12 @@ export async function connectDB() {
     });
   }
 
-  cache.conn = await cache.promise;
+  try {
+    cache.conn = await cache.promise;
+  } catch (error) {
+    console.error("MongoDB connection error:", error);
+    cache.promise = null;
+    throw error;
+  }
   return cache.conn;
 }
